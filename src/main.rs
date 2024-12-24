@@ -4,12 +4,7 @@
 use defmt_rtt as _;
 use embassy_executor::Spawner;
 use embassy_stm32::{
-    bind_interrupts,
-    gpio::{Input, Level, Output, OutputType, Pull, Speed},
-    i2c,
-    peripherals::{self, TIM2},
-    time::{hz, khz, Hertz},
-    timer::simple_pwm::{PwmPin, SimplePwm},
+    bind_interrupts, gpio::{Input, Level, Output, OutputType, Pull, Speed}, i2c, peripherals::{self, TIM2}, time::{hz, khz, Hertz}, timer::simple_pwm::{PwmPin, SimplePwm}
 };
 use embassy_time::{Duration, Instant, Timer};
 use embedded_graphics::{
@@ -21,7 +16,6 @@ use embedded_graphics::{
 };
 use heapless::String;
 use panic_probe as _;
-use rand::{rngs::SmallRng, Rng, SeedableRng};
 use ssd1306::{prelude::*, I2CDisplayInterface, Ssd1306Async};
 use tinybmp::Bmp;
 
@@ -36,15 +30,18 @@ bind_interrupts!(struct Irqs {
 });
 use core::fmt::Write; // for write! macro
 
-const GREETENGS_SIZE: usize = 2;
 const FREQUENCY: u64 = 15_000;
 const PERIOD: u64 = 1_000_000 / FREQUENCY;
 const REMANING_SHOW_TIME: u64 = 5;
 
+#[no_mangle]
+#[cfg_attr(target_os = "none", link_section = ".HardFault.user")]
+unsafe extern "C" fn HardFault() {
+    cortex_m::peripheral::SCB::sys_reset();
+}
+
 #[embassy_executor::main]
 async fn main(_spawner: Spawner) {
-    let mut config = embassy_rp::config::Config::default();
-    config.clocks = clocks::ClockConfig::rosc();
     let p = embassy_stm32::init(Default::default());
 
     // Relay to control light
@@ -120,7 +117,7 @@ async fn main(_spawner: Spawner) {
 
         let _ = display.flush().await;
 
-        Timer::after_millis(1600).await;
+        Timer::after_millis(3000).await;
     }
 
     for _ in 0..10 {
@@ -130,7 +127,6 @@ async fn main(_spawner: Spawner) {
         Timer::after_millis(25).await;
     }
 
-    // 
     let greeting_1 = Bmp::<Rgb565>::from_slice(include_bytes!("../res/Guten Tag.bmp")).unwrap();
     let greeting_2 = Bmp::<Rgb565>::from_slice(include_bytes!("../res/こんにちは.bmp")).unwrap();
 
@@ -138,9 +134,6 @@ async fn main(_spawner: Spawner) {
         Image::new(&greeting_1, Point::new(0, 0)),
         Image::new(&greeting_2, Point::new(0, 0)),
     ];
-
-    // Random generator
-    let mut rng = SmallRng::seed_from_u64(0xdead_beef_cafe_d00b);
 
     let mut off_time = Instant::now();
     let mut start_off_time = Instant::now();
@@ -160,6 +153,8 @@ async fn main(_spawner: Spawner) {
 
     let _ = display.flush().await;
 
+    let mut current_greeting = 0;
+
     loop {
         let now = Instant::now();
 
@@ -174,13 +169,13 @@ async fn main(_spawner: Spawner) {
                 .checked_add(Duration::from_secs(REMANING_SHOW_TIME))
                 .unwrap();
             button_pressed_time = now;
-            
+
             if light_duration >= 600 {
                 light_duration = 60;
             } else {
                 light_duration += 60;
             }
-            
+
             play_sound(&mut speaker_pwm, 10).await;
 
             let _ = display.clear_buffer();
@@ -203,7 +198,7 @@ async fn main(_spawner: Spawner) {
             is_enabled = false;
             relay_pin.set_low();
             let _ = display.clear_buffer();
-            
+
             Text::with_baseline(
                 "I am watching for you)",
                 Point::zero(),
@@ -220,7 +215,7 @@ async fn main(_spawner: Spawner) {
             off_time = now
                 .checked_add(Duration::from_secs(light_duration))
                 .unwrap();
-        } 
+        }
         // Detected new movement
         else if is_move {
             is_enabled = true;
@@ -231,19 +226,17 @@ async fn main(_spawner: Spawner) {
 
             relay_pin.set_high();
 
-            let greeting_id = rng.gen_range(0..GREETENGS_SIZE);
+            current_greeting = if current_greeting == 0 { 1 } else { 0 };
 
             let _ = display.clear_buffer();
 
-            greetings_images[greeting_id]
+            greetings_images[current_greeting]
                 .draw(&mut display.color_converted())
                 .unwrap();
 
             let _ = display.flush().await;
 
-            let id = greeting_id % 5;
-
-            let sample = match id {
+            let sample = match current_greeting {
                 0 => GUTEN_TAG_SAMPLE.as_ref(),
                 1 => JAPANEESE_SAMPLE.as_ref(),
                 _ => panic!("incorrect greeting id"),
@@ -307,7 +300,7 @@ pub trait SoundedOutput {
     // play prepared sample
     async fn play_by_samples(&mut self, samples: &[i8]);
 
-    // play some fx 
+    // play some fx
     async fn play_fx(&mut self, value: u8, period: u64);
 }
 
