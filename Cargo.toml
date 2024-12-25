@@ -18,9 +18,9 @@ panic-probe = { version = "0.3.1", features = ["print-defmt"] }
 tinybmp = "0.5.0"
 # Used by the noise_i2c examples
 embassy-embedded-hal = { version = "0.2.0", default-features=false }
-embassy-executor = { version = "0.6.0", git = "https://github.com/embassy-rs/embassy", features = ["arch-cortex-m", "executor-thread", "defmt"] }
+embassy-executor = { version = "0.7.0", git = "https://github.com/embassy-rs/embassy", features = ["arch-cortex-m", "executor-thread", "defmt"] }
 embassy-stm32 = { version = "0.1.0", git = "https://github.com/embassy-rs/embassy", features = [ "stm32f103c8", "memory-x", "defmt", "exti", "time-driver-tim3" , "unstable-pac"]  }
-embassy-time = { version = "0.3.1", git = "https://github.com/embassy-rs/embassy" }
+embassy-time = { version = "0.4.0", git = "https://github.com/embassy-rs/embassy" }
 embassy-futures = "0.1.1"
 embedded-hal-bus = { version = "0.2.0", features = ["async"]}
 embedded-hal-async = { version = "1.0.0",  optional = true }

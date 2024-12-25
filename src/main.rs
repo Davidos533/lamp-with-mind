@@ -4,7 +4,12 @@
 use defmt_rtt as _;
 use embassy_executor::Spawner;
 use embassy_stm32::{
-    bind_interrupts, gpio::{Input, Level, Output, OutputType, Pull, Speed}, i2c, peripherals::{self, TIM2}, time::{hz, khz, Hertz}, timer::simple_pwm::{PwmPin, SimplePwm}
+    bind_interrupts,
+    gpio::{Input, Level, Output, OutputType, Pull, Speed},
+    i2c,
+    peripherals::{self, TIM2},
+    time::{hz, khz, Hertz},
+    timer::simple_pwm::{PwmPin, SimplePwm},
 };
 use embassy_time::{Duration, Instant, Timer};
 use embedded_graphics::{
@@ -33,6 +38,24 @@ use core::fmt::Write; // for write! macro
 const FREQUENCY: u64 = 15_000;
 const PERIOD: u64 = 1_000_000 / FREQUENCY;
 const REMANING_SHOW_TIME: u64 = 5;
+const INITIAL_SPEAKER_FREQUENCY: u32 = 1;
+const LIGHT_DURATION: u64 = 300;
+const DISPLAY_FREQUENCY: u32 = 400;
+const LOAD_SOUND_DIVIDEND: u64 = 100;
+const LOADING_MARGIN: i32 = 16;
+const LOADING_STEP_MULTIPLIER: i32 = 12;
+const DISPLAY_WIDTH: i32 = 128;
+const LOADING_DELAY: u64 = 3000;
+const LOADING_LED_BLINKING_DELAY: u64 = 25;
+const ZERO_POS: i32 = 0;
+const INITIAL_GREETING: usize = 0;
+const SECOND_GREETING: usize = 1;
+const CHANGE_DURATION_DELAY: u64 = 250;
+const DURATION_DELAY_UPPER_BOUND: u64 = 600;
+const DURATION_DELAY_LOWER_BOUND: u64 = 60;
+const CHANGE_DELAY_SOUND_FX: u64 = 10;
+const SECS_IN_MINS: u64 = 60;
+const SPEAKER_FREQUENCY: u32 = 100;
 
 #[no_mangle]
 #[cfg_attr(target_os = "none", link_section = ".HardFault.user")]
@@ -61,7 +84,7 @@ async fn main(_spawner: Spawner) {
         Some(buzz_pin),
         None,
         None,
-        hz(1),
+        hz(INITIAL_SPEAKER_FREQUENCY),
         Default::default(),
     );
 
@@ -69,7 +92,7 @@ async fn main(_spawner: Spawner) {
     let button = Input::new(p.PA5, Pull::Up);
     let mut end_show_new_time = Instant::now();
     let mut button_pressed_time = Instant::now();
-    let mut light_duration = 300;
+    let mut light_duration = LIGHT_DURATION;
 
     // Display
     let display_sensors = embassy_stm32::i2c::I2c::new(
@@ -79,7 +102,7 @@ async fn main(_spawner: Spawner) {
         Irqs,
         p.DMA1_CH6,
         p.DMA1_CH7,
-        Hertz::khz(400),
+        Hertz::khz(DISPLAY_FREQUENCY),
         Default::default(),
     );
 
@@ -104,11 +127,14 @@ async fn main(_spawner: Spawner) {
     let _ = display.flush().await;
 
     for i in (1..10).rev() {
-        play_sound(&mut speaker_pwm, 100 / i).await;
+        play_sound(&mut speaker_pwm, LOAD_SOUND_DIVIDEND / i).await;
 
         Text::with_baseline(
             "#",
-            Point::new(128 - (((i as i32) + 2) * 12), 16),
+            Point::new(
+                DISPLAY_WIDTH - (((i as i32) + 2) * LOADING_STEP_MULTIPLIER),
+                LOADING_MARGIN,
+            ),
             text_style,
             Baseline::Top,
         )
@@ -117,22 +143,22 @@ async fn main(_spawner: Spawner) {
 
         let _ = display.flush().await;
 
-        Timer::after_millis(3000).await;
+        Timer::after_millis(LOADING_DELAY).await;
     }
 
     for _ in 0..10 {
         user_led.set_low();
-        Timer::after_millis(25).await;
+        Timer::after_millis(LOADING_LED_BLINKING_DELAY).await;
         user_led.set_high();
-        Timer::after_millis(25).await;
+        Timer::after_millis(LOADING_LED_BLINKING_DELAY).await;
     }
 
     let greeting_1 = Bmp::<Rgb565>::from_slice(include_bytes!("../res/Guten Tag.bmp")).unwrap();
     let greeting_2 = Bmp::<Rgb565>::from_slice(include_bytes!("../res/こんにちは.bmp")).unwrap();
 
     let greetings_images = [
-        Image::new(&greeting_1, Point::new(0, 0)),
-        Image::new(&greeting_2, Point::new(0, 0)),
+        Image::new(&greeting_1, Point::new(ZERO_POS, ZERO_POS)),
+        Image::new(&greeting_2, Point::new(ZERO_POS, ZERO_POS)),
     ];
 
     let mut off_time = Instant::now();
@@ -153,7 +179,7 @@ async fn main(_spawner: Spawner) {
 
     let _ = display.flush().await;
 
-    let mut current_greeting = 0;
+    let mut current_greeting = INITIAL_GREETING;
 
     loop {
         let now = Instant::now();
@@ -161,26 +187,28 @@ async fn main(_spawner: Spawner) {
         // Display change duration message
         if now
             > button_pressed_time
-                .checked_add(Duration::from_millis(250))
+                .checked_add(Duration::from_millis(CHANGE_DURATION_DELAY))
                 .unwrap()
             && button.is_low()
         {
             end_show_new_time = now
                 .checked_add(Duration::from_secs(REMANING_SHOW_TIME))
                 .unwrap();
+
             button_pressed_time = now;
 
-            if light_duration >= 600 {
-                light_duration = 60;
+            if light_duration >= DURATION_DELAY_UPPER_BOUND {
+                light_duration = DURATION_DELAY_LOWER_BOUND;
             } else {
-                light_duration += 60;
+                light_duration += DURATION_DELAY_LOWER_BOUND;
             }
 
-            play_sound(&mut speaker_pwm, 10).await;
+            play_sound(&mut speaker_pwm, CHANGE_DELAY_SOUND_FX).await;
 
             let _ = display.clear_buffer();
+
             Text::with_baseline(
-                duration_to_string(light_duration / 60, false).as_str(),
+                duration_to_string(light_duration / SECS_IN_MINS, false).as_str(),
                 Point::zero(),
                 text_style,
                 Baseline::Top,
@@ -199,14 +227,9 @@ async fn main(_spawner: Spawner) {
             relay_pin.set_low();
             let _ = display.clear_buffer();
 
-            Text::with_baseline(
-                "I am watching for you)",
-                Point::zero(),
-                text_style,
-                Baseline::Top,
-            )
-            .draw(&mut display)
-            .unwrap();
+            Text::with_baseline("I am watching", Point::zero(), text_style, Baseline::Top)
+                .draw(&mut display)
+                .unwrap();
 
             let _ = display.flush().await;
         }
@@ -226,7 +249,11 @@ async fn main(_spawner: Spawner) {
 
             relay_pin.set_high();
 
-            current_greeting = if current_greeting == 0 { 1 } else { 0 };
+            current_greeting = if current_greeting == INITIAL_GREETING {
+                SECOND_GREETING
+            } else {
+                INITIAL_GREETING
+            };
 
             let _ = display.clear_buffer();
 
@@ -237,8 +264,8 @@ async fn main(_spawner: Spawner) {
             let _ = display.flush().await;
 
             let sample = match current_greeting {
-                0 => GUTEN_TAG_SAMPLE.as_ref(),
-                1 => JAPANEESE_SAMPLE.as_ref(),
+                INITIAL_GREETING => GUTEN_TAG_SAMPLE.as_ref(),
+                SECOND_GREETING => JAPANEESE_SAMPLE.as_ref(),
                 _ => panic!("incorrect greeting id"),
             };
 
@@ -281,17 +308,20 @@ fn duration_to_string(time: u64, is_secs: bool) -> String<32> {
 
 async fn play_sound<'d>(p: &mut SimplePwm<'d, TIM2>, divider: u64) {
     const UPPER_BOUND: u32 = 200;
+    const FX_MIDDLE_POINT: u32 = 2;
+    const FX_PARAMETER_1: f64 = 100f64;
+    const FX_PARAMETER_2: u64 = 1000;
 
     for i in 0..UPPER_BOUND {
         let input = i as f64;
         let s: f64;
-        if i < UPPER_BOUND / 2 {
+        if i < UPPER_BOUND / FX_MIDDLE_POINT {
             s = libm::sin(input);
         } else {
             s = libm::cos(input);
         }
 
-        p.play_fx((s * 100f64) as u8, 1000 / divider).await;
+        p.play_fx((s * FX_PARAMETER_1) as u8, FX_PARAMETER_2 / divider).await;
     }
 }
 
@@ -307,13 +337,17 @@ pub trait SoundedOutput {
 // Extend pwm pin for play sounds
 impl<'d> SoundedOutput for SimplePwm<'d, TIM2> {
     async fn play_by_samples(&mut self, samples: &[i8]) {
-        self.set_frequency(khz(100));
+        const BYTE_UPPER_BOUND_PLUSE_ONE: f32 = 128f32;
+        const UBYTE_UPPER_BOUND_PLUSE_ONE: f32 = 255f32;
+        const SAMPLE_MULTIPLIER: f32 = 100f32;
+
+        self.set_frequency(khz(SPEAKER_FREQUENCY));
 
         let mut ch2 = self.ch2();
         ch2.enable();
 
         for sample in samples.iter() {
-            let sample = (((*sample as f32 + 128f32) / 255f32) * 100f32) as u8;
+            let sample = (((*sample as f32 + BYTE_UPPER_BOUND_PLUSE_ONE) / UBYTE_UPPER_BOUND_PLUSE_ONE) * SAMPLE_MULTIPLIER) as u8;
 
             ch2.set_duty_cycle_percent(sample);
             Timer::after_micros(PERIOD as u64).await;
@@ -324,7 +358,7 @@ impl<'d> SoundedOutput for SimplePwm<'d, TIM2> {
     }
 
     async fn play_fx(&mut self, value: u8, period: u64) {
-        self.set_frequency(khz(100));
+        self.set_frequency(khz(SPEAKER_FREQUENCY));
 
         let mut ch2 = self.ch2();
         ch2.enable();
