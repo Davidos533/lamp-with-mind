@@ -1,4 +1,5 @@
 # lamp with some signs of mind
 This source code create for STM32F103C8:
 
-![image](https://github.com/user-attachments/assets/84c8b08c-b4ca-4472-a9bb-5d1670b1b8ed)
+![lamp-with-mind-scheme](https://github.com/user-attachments/assets/2ce7db52-fd9a-4c5a-a995-f5c323b12c67)
+
